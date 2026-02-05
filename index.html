@@ -10,17 +10,20 @@ body {
     background: black;
     color: white;
     font-family: Arial, sans-serif;
-    height: 100vh;
 }
 
-/* ===== HEADER ===== */
+/* ===== HEADER TOUJOURS VISIBLE ===== */
 .header {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    right: 20px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 160px;
     display: flex;
     align-items: center;
+    padding: 20px;
+    z-index: 10;
+    background: black;
 }
 
 .logo {
@@ -32,14 +35,13 @@ body {
     text-align: center;
     font-size: 140px;
     font-weight: bold;
-    color: white;
 }
 
-/* ===== LAYOUT ===== */
+/* ===== CONTENU ===== */
 .container {
     display: flex;
-    height: 100vh;
-    padding-top: 200px;
+    height: calc(100vh - 160px);
+    padding-top: 160px;
 }
 
 .left {
@@ -57,6 +59,7 @@ body {
 
 .controls {
     text-align: center;
+    margin-top: 10px;
 }
 
 .controls input,
@@ -64,6 +67,7 @@ body {
     font-size: 18px;
     padding: 6px 12px;
     margin: 5px;
+    width: 90px;
 }
 
 .right {
@@ -87,14 +91,44 @@ th, td {
 }
 
 button.teamStop {
-    font-size: 14px;
+    font-size: 64px;
+    width: auto;
+}
+/* ===== BOUTONS CHRONO – SANS CONTOUR ===== */
+.controls button {
+    background: black;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 18px;
+    padding: 14px 22px;
+    margin: 8px;
+    cursor: pointer;
+
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+
+    outline: none;
+}
+
+.controls button:focus {
+    outline: none;
+}
+
+.controls button:hover {
+    background: #222;
+}
+
+.controls button:active {
+    transform: scale(0.97);
 }
 </style>
 </head>
 
 <body>
 
-<!-- ===== HEADER ===== -->
+<!-- ===== HEADER FIXE ===== -->
 <div class="header">
     <img src="logo.png" class="logo">
     <div class="title">LP'ROX</div>
@@ -105,31 +139,37 @@ button.teamStop {
     <div class="left">
         <div class="time" id="chrono">00:00:00</div>
 
-        <div class="controls">
-            ⏳ Compte à rebours (s) :
+        <!-- ===== RÉGLAGES (CACHÉS APRÈS DÉPART) ===== -->
+        <div class="controls" id="settings">
+            ⏳ Compte à rebours (s)<br>
             <input type="number" id="countdown" value="10" min="0"><br>
 
-            👥 Nombre d’équipes :
+            👥 Nombre d’équipes<br>
             <input type="number" id="teamsCount" value="5" min="1" max="30"><br>
 
-            ⏱️ Intervalle départ (min) :
-            <input type="number" id="interval" value="1" min="1"><br><br>
+            ⏱️ Décalage entre équipes<br>
+            <input type="number" id="intervalMin" value="1" min="0"> min
+            <input type="number" id="intervalSec" value="0" min="0" max="59"> sec
+        </div>
 
-            <button onclick="startRace()">▶️ Démarrer</button>
-            <button onclick="pauseRace()">⏸️ Pause</button>
-            <button onclick="resumeRace()">▶️ Reprendre</button>
-            <button onclick="stopRace()">⏹️ Stop</button>
+        <!-- ===== COMMANDES TOUJOURS VISIBLES ===== -->
+        <div class="controls">
+            <button onclick="startRace()">▶️</span></button>
+            <button onclick="pauseRace()">⏸️</span></button>
+            <button onclick="resumeRace()">⏯️</span></button> 
+            <button onclick="stopRace()">⏹️</span></button> 
         </div>
     </div>
 
+    <!-- ===== TABLEAU ===== -->
     <div class="right">
         <h2>Départs équipes</h2>
         <table id="teamTable">
             <tr>
                 <th>Équipe</th>
-                <th>Décalage</th>
+                <th>Départ</th>
                 <th>Temps</th>
-                <th>Arrêt</th>
+                <th>Arrivée</th>
             </tr>
         </table>
     </div>
@@ -137,7 +177,6 @@ button.teamStop {
 </div>
 
 <script>
-/* ===== VARIABLES ===== */
 let startTime = null;
 let elapsed = 0;
 let running = false;
@@ -145,29 +184,17 @@ let paused = false;
 let chronoTimer = null;
 let countdownTimer = null;
 let teams = [];
-let announcements = [];
+let announced = [];
 
-/* ===== VOIX (MEILLEURE POSSIBLE NAVIGATEUR) ===== */
 function speak(text) {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "fr-FR";
     u.rate = 0.85;
     u.pitch = 0.7;
-    u.volume = 1;
-
-    const voices = speechSynthesis.getVoices();
-    const preferred = voices.find(v =>
-        v.lang === "fr-FR" &&
-        (v.name.includes("Google") || v.name.includes("Microsoft"))
-    );
-
-    if (preferred) u.voice = preferred;
-
     speechSynthesis.cancel();
     speechSynthesis.speak(u);
 }
 
-/* ===== FORMAT ===== */
 function format(ms) {
     if (ms < 0) return "--:--:--";
     const s = Math.floor(ms / 1000);
@@ -177,113 +204,87 @@ function format(ms) {
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
 }
 
-/* ===== ÉQUIPES ===== */
-function generateTeams(count, intervalMin) {
+function generateTeams(count, intervalMs) {
     teams = [];
-    announcements = [];
-
+    announced = [];
     const table = document.getElementById("teamTable");
     table.innerHTML = `
-        <tr>
-            <th>Équipe</th>
-            <th>Décalage</th>
-            <th>Temps</th>
-            <th>Arrêt</th>
-        </tr>`;
+        <tr><th>Équipe</th><th>Départ</th><th>Temps</th><th>Arrivée</th></tr>`;
 
     for (let i = 0; i < count; i++) {
-        const delay = i * intervalMin * 60000;
-        teams.push({ letter: String.fromCharCode(65 + i), delay, finished: false, time: 0 });
-        announcements.push(false);
+        const delay = i * intervalMs;
+        teams.push({ letter: String.fromCharCode(65 + i), delay, finished: false });
+        announced.push(false);
 
         const row = table.insertRow();
         row.insertCell().innerText = teams[i].letter;
-        row.insertCell().innerText = `${i} min`;
+
+        const t = Math.floor(delay / 1000);
+        row.insertCell().innerText = `${Math.floor(t/60)}m ${String(t%60).padStart(2,'0')}s`;
+
         row.insertCell().id = "time" + i;
 
         const btn = document.createElement("button");
         btn.innerText = "STOP";
-        btn.className = "teamStop";
         btn.onclick = () => stopTeam(i);
         row.insertCell().appendChild(btn);
     }
 }
 
-/* ===== DÉMARRAGE ===== */
 function startRace() {
     stopRace();
+    document.getElementById("settings").style.display = "none";
 
-    const cd = Number(document.getElementById("countdown").value);
-    const count = Number(document.getElementById("teamsCount").value);
-    const interval = Number(document.getElementById("interval").value);
+    const cd = +countdown.value;
+    const count = +teamsCount.value;
+    const intervalMs = (+intervalMin.value * 60 + +intervalSec.value) * 1000;
 
-    generateTeams(count, interval);
+    generateTeams(count, intervalMs);
 
     let remaining = cd;
-    running = false;
-    paused = false;
-
     countdownTimer = setInterval(() => {
-        if (remaining > 0) {
-            speak(remaining.toString());
-            remaining--;
-        } else {
+        if (remaining > 0) speak(remaining--);
+        else {
             clearInterval(countdownTimer);
             speak("Départ équipe A");
-
             startTime = Date.now();
-            elapsed = 0;
             running = true;
-
             chronoTimer = setInterval(updateChrono, 100);
         }
     }, 1000);
 }
 
-/* ===== CHRONO ===== */
 function updateChrono() {
     if (!running || paused) return;
-
     elapsed = Date.now() - startTime;
-    document.getElementById("chrono").innerText = format(elapsed);
+    chrono.innerText = format(elapsed);
 
     teams.forEach((t, i) => {
-        if (!t.finished && elapsed >= t.delay) {
-            document.getElementById("time" + i).innerText = format(elapsed - t.delay);
-        }
-        if (!announcements[i] && elapsed >= t.delay) {
+        if (!t.finished && elapsed >= t.delay)
+            document.getElementById("time"+i).innerText = format(elapsed - t.delay);
+        if (!announced[i] && elapsed >= t.delay) {
             speak(`Départ équipe ${t.letter}`);
-            announcements[i] = true;
+            announced[i] = true;
         }
     });
 }
 
-/* ===== ACTIONS ===== */
 function stopTeam(i) {
-    if (teams[i].finished) return;
-    teams[i].finished = true;
-    teams[i].time = elapsed - teams[i].delay;
-    document.getElementById("time" + i).innerText = format(teams[i].time);
+    if (!teams[i].finished) {
+        teams[i].finished = true;
+        document.getElementById("time"+i).innerText = format(elapsed - teams[i].delay);
+    }
 }
 
-function pauseRace() {
-    if (!running || paused) return;
-    paused = true;
-}
-
-function resumeRace() {
-    if (!running || !paused) return;
-    paused = false;
-    startTime = Date.now() - elapsed;
-}
+function pauseRace() { paused = true; }
+function resumeRace() { paused = false; startTime = Date.now() - elapsed; }
 
 function stopRace() {
     running = false;
     paused = false;
     clearInterval(chronoTimer);
     clearInterval(countdownTimer);
-    elapsed = 0;
-    document.getElementById("chrono").innerText = "00:00:00";
+    chrono.innerText = "00:00:00";
     speechSynthesis.cancel();
 }
 </script>
