@@ -2,187 +2,289 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Chronomètre Course Équipes</title>
+<title>LP'ROX – Chronomètre</title>
+
 <style>
 body {
     margin: 0;
-    font-family: Arial, sans-serif;
     background: black;
     color: white;
-    display: flex;
+    font-family: Arial, sans-serif;
     height: 100vh;
 }
+
+/* ===== HEADER ===== */
+.header {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+}
+
+.logo {
+    height: 150px;
+}
+
+.title {
+    flex: 1;
+    text-align: center;
+    font-size: 140px;
+    font-weight: bold;
+    color: white;
+}
+
+/* ===== LAYOUT ===== */
+.container {
+    display: flex;
+    height: 100vh;
+    padding-top: 200px;
+}
+
 .left {
     flex: 2;
     display: flex;
     flex-direction: column;
-    justify-content: center;
     align-items: center;
+    justify-content: center;
 }
+
 .time {
     font-size: 140px;
     font-weight: bold;
 }
+
 .controls {
-    margin-top: 20px;
     text-align: center;
 }
-input, button {
+
+.controls input,
+.controls button {
     font-size: 18px;
     padding: 6px 12px;
     margin: 5px;
 }
+
 .right {
     flex: 1;
     background: #111;
-    padding: 20px;
+    padding: 15px;
     overflow-y: auto;
 }
+
+/* ===== TABLE ===== */
 table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 18px;
+    font-size: 16px;
 }
+
 th, td {
     border-bottom: 1px solid #444;
     padding: 6px;
     text-align: center;
 }
-th {
-    background: #222;
+
+button.teamStop {
+    font-size: 14px;
 }
 </style>
 </head>
 
 <body>
 
-<div class="left">
-    <div class="time" id="chrono">00:00:00</div>
-
-    <div class="controls">
-        ⏱️ Compte à rebours (s) :
-        <input type="number" id="countdown" value="10" min="0"><br>
-
-        👥 Nombre d’équipes :
-        <input type="number" id="teams" value="5" min="1" max="30"><br>
-
-        ⏱️ Intervalle (min) :
-        <input type="number" id="interval" value="1" min="1"><br><br>
-
-        <button onclick="startRace()">▶️ Démarrer</button>
-        <button onclick="togglePause()">⏸️ Pause</button>
-        <button onclick="stopRace()">⏹️ Stop</button>
-    </div>
+<!-- ===== HEADER ===== -->
+<div class="header">
+    <img src="logo.png" class="logo">
+    <div class="title">LP'ROX</div>
 </div>
 
-<div class="right">
-    <h2>Départs équipes</h2>
-    <table id="teamTable">
-        <tr><th>Équipe</th><th>Départ</th></tr>
-    </table>
+<div class="container">
+
+    <div class="left">
+        <div class="time" id="chrono">00:00:00</div>
+
+        <div class="controls">
+            ⏳ Compte à rebours (s) :
+            <input type="number" id="countdown" value="10" min="0"><br>
+
+            👥 Nombre d’équipes :
+            <input type="number" id="teamsCount" value="5" min="1" max="30"><br>
+
+            ⏱️ Intervalle départ (min) :
+            <input type="number" id="interval" value="1" min="1"><br><br>
+
+            <button onclick="startRace()">▶️ Démarrer</button>
+            <button onclick="pauseRace()">⏸️ Pause</button>
+            <button onclick="resumeRace()">▶️ Reprendre</button>
+            <button onclick="stopRace()">⏹️ Stop</button>
+        </div>
+    </div>
+
+    <div class="right">
+        <h2>Départs équipes</h2>
+        <table id="teamTable">
+            <tr>
+                <th>Équipe</th>
+                <th>Décalage</th>
+                <th>Temps</th>
+                <th>Arrêt</th>
+            </tr>
+        </table>
+    </div>
+
 </div>
 
 <script>
-let startTime = 0;
-let elapsedBeforePause = 0;
-let chronoInterval = null;
-let announcements = [];
-let paused = false;
+/* ===== VARIABLES ===== */
+let startTime = null;
+let elapsed = 0;
 let running = false;
+let paused = false;
+let chronoTimer = null;
+let countdownTimer = null;
+let teams = [];
+let announcements = [];
 
+/* ===== VOIX (MEILLEURE POSSIBLE NAVIGATEUR) ===== */
 function speak(text) {
-    const msg = new SpeechSynthesisUtterance(text);
-    msg.lang = "fr-FR";
-    speechSynthesis.speak(msg);
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "fr-FR";
+    u.rate = 0.85;
+    u.pitch = 0.7;
+    u.volume = 1;
+
+    const voices = speechSynthesis.getVoices();
+    const preferred = voices.find(v =>
+        v.lang === "fr-FR" &&
+        (v.name.includes("Google") || v.name.includes("Microsoft"))
+    );
+
+    if (preferred) u.voice = preferred;
+
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
 }
 
-function formatTime(ms) {
-    const totalSeconds = Math.floor(ms / 1000);
-    const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
-    const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
-    const s = String(totalSeconds % 60).padStart(2, '0');
-    return `${h}:${m}:${s}`;
+/* ===== FORMAT ===== */
+function format(ms) {
+    if (ms < 0) return "--:--:--";
+    const s = Math.floor(ms / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
 }
 
-function generateTeams(n, interval) {
-    const table = document.getElementById("teamTable");
-    table.innerHTML = `<tr><th>Équipe</th><th>Départ</th></tr>`;
+/* ===== ÉQUIPES ===== */
+function generateTeams(count, intervalMin) {
+    teams = [];
     announcements = [];
 
-    for (let i = 0; i < n; i++) {
-        const letter = String.fromCharCode(65 + i);
-        const delay = i * interval * 60 * 1000;
+    const table = document.getElementById("teamTable");
+    table.innerHTML = `
+        <tr>
+            <th>Équipe</th>
+            <th>Décalage</th>
+            <th>Temps</th>
+            <th>Arrêt</th>
+        </tr>`;
 
-        announcements.push({ letter, delay, announced: false });
+    for (let i = 0; i < count; i++) {
+        const delay = i * intervalMin * 60000;
+        teams.push({ letter: String.fromCharCode(65 + i), delay, finished: false, time: 0 });
+        announcements.push(false);
 
         const row = table.insertRow();
-        row.insertCell(0).innerText = letter;
-        row.insertCell(1).innerText = `${i} min`;
+        row.insertCell().innerText = teams[i].letter;
+        row.insertCell().innerText = `${i} min`;
+        row.insertCell().id = "time" + i;
+
+        const btn = document.createElement("button");
+        btn.innerText = "STOP";
+        btn.className = "teamStop";
+        btn.onclick = () => stopTeam(i);
+        row.insertCell().appendChild(btn);
     }
 }
 
+/* ===== DÉMARRAGE ===== */
 function startRace() {
     stopRace();
-    const countdown = Number(document.getElementById("countdown").value);
-    const teams = Number(document.getElementById("teams").value);
+
+    const cd = Number(document.getElementById("countdown").value);
+    const count = Number(document.getElementById("teamsCount").value);
     const interval = Number(document.getElementById("interval").value);
 
-    generateTeams(teams, interval);
-    let remaining = countdown;
-    running = true;
+    generateTeams(count, interval);
+
+    let remaining = cd;
+    running = false;
     paused = false;
 
-    const cd = setInterval(() => {
-        if (!running) {
-            clearInterval(cd);
-            return;
-        }
+    countdownTimer = setInterval(() => {
         if (remaining > 0) {
             speak(remaining.toString());
             remaining--;
         } else {
-            clearInterval(cd);
+            clearInterval(countdownTimer);
             speak("Départ équipe A");
+
             startTime = Date.now();
-            elapsedBeforePause = 0;
-            chronoInterval = setInterval(updateChrono, 100);
+            elapsed = 0;
+            running = true;
+
+            chronoTimer = setInterval(updateChrono, 100);
         }
     }, 1000);
 }
 
+/* ===== CHRONO ===== */
 function updateChrono() {
-    if (paused) return;
-    const elapsed = Date.now() - startTime + elapsedBeforePause;
-    document.getElementById("chrono").innerText = formatTime(elapsed);
+    if (!running || paused) return;
 
-    announcements.forEach(team => {
-        if (!team.announced && elapsed >= team.delay) {
-            speak(`Départ équipe ${team.letter}`);
-            team.announced = true;
+    elapsed = Date.now() - startTime;
+    document.getElementById("chrono").innerText = format(elapsed);
+
+    teams.forEach((t, i) => {
+        if (!t.finished && elapsed >= t.delay) {
+            document.getElementById("time" + i).innerText = format(elapsed - t.delay);
+        }
+        if (!announcements[i] && elapsed >= t.delay) {
+            speak(`Départ équipe ${t.letter}`);
+            announcements[i] = true;
         }
     });
 }
 
-function togglePause() {
-    if (!running) return;
+/* ===== ACTIONS ===== */
+function stopTeam(i) {
+    if (teams[i].finished) return;
+    teams[i].finished = true;
+    teams[i].time = elapsed - teams[i].delay;
+    document.getElementById("time" + i).innerText = format(teams[i].time);
+}
 
-    if (!paused) {
-        paused = true;
-        elapsedBeforePause += Date.now() - startTime;
-        speechSynthesis.cancel();
-    } else {
-        paused = false;
-        startTime = Date.now();
-    }
+function pauseRace() {
+    if (!running || paused) return;
+    paused = true;
+}
+
+function resumeRace() {
+    if (!running || !paused) return;
+    paused = false;
+    startTime = Date.now() - elapsed;
 }
 
 function stopRace() {
     running = false;
     paused = false;
-    elapsedBeforePause = 0;
-    clearInterval(chronoInterval);
-    speechSynthesis.cancel();
+    clearInterval(chronoTimer);
+    clearInterval(countdownTimer);
+    elapsed = 0;
     document.getElementById("chrono").innerText = "00:00:00";
+    speechSynthesis.cancel();
 }
 </script>
 
